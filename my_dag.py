@@ -1,11 +1,9 @@
 
-import subprocess
-subprocess.run(["pip3", "install", "scikit-learn", "joblib", "pandas", "requests"])
 from datetime import datetime
 from airflow import DAG
 from airflow.operators.python_operator import PythonOperator
-
-
+import joblib
+import re
 import requests
 import json
 
@@ -15,26 +13,28 @@ def install_dependencies():
     subprocess.run(["pip3", "install", "scikit-learn", "joblib", "pandas", "requests"])
 
 def load_model():
-    import joblib
-    model = joblib.load('/opt/airflow/dags/email_classifier_model.joblib')
-    vectorizer = joblib.load('/opt/airflow/dags/vectorizer.joblib')
-    return model, vectorizer
+    model = joblib.load('/opt/airflow/dags/phone_number_model.joblib')
+    return model
 
-def predict_phone_number(input_string, model, vectorizer):
-    # Vectorize the input text
-    input_text_vectorized = vectorizer.transform([input_string])
-    
-    # Predict using the loaded model
-    prediction = model.predict(input_text_vectorized)
-    
-    # Determine result
-    if prediction[0] == 1:
-        result = "The input is predicted to contain an email address."
+def extract_features(text):
+    if re.match(r'\d{3}-\d{3}-\d{3}', text):
+        return 1
     else:
-        result = "The input is predicted not to contain an email address."
-    
+        return 0
+
+def predict_phone_number(input_string, model):
+    tokens = input_string.split(" ")
+    for token in tokens:
+        features = extract_features(token)
+        prediction = model.predict([[features]])
+        if prediction == 1:
+            result = "Phone Number"
+            break
+    else:
+        result = "Not a Phone Number"
+
     # Send the result to the API
-    api_url = "http://192.168.0.6:5000/save_data"
+    api_url = "http://192.168.100.111:5000/save_data"
     data = {"data": result}
     response = requests.post(api_url, headers={"Content-Type": "application/json"}, data=json.dumps(data))
 
@@ -45,28 +45,19 @@ def predict_phone_number(input_string, model, vectorizer):
 
     return result
 
-'''def execute_prediction():
-    input_string = "iam a tamilse casfio fasdvasv 23523-523-5325-235-53-235-5"
-    model, vectorizer = load_model()
-    prediction = predict_phone_number(input_string, model, vectorizer)
-    print(f"{input_string}: {prediction}")
-
-'''
-
-
 def execute_prediction():
     # Read the input string from logs.log
     with open('/opt/airflow/dags/logs.log', 'r') as file:
         input_string = file.read().strip()  # Read the entire content and strip any leading/trailing whitespace
-        model, vectorizer = load_model()
-        prediction = predict_phone_number(input_string, model, vectorizer)
-        print(f"{input_string}: {prediction}")
     
-
-
-
-
-
+    # Load the model
+    model = load_model()
+    
+    # Make the prediction
+    prediction = predict_phone_number(input_string, model)
+    
+    # Print the result
+    print(f"{input_string}: {prediction}")
 
 # Define the DAG
 default_args = {
@@ -77,9 +68,9 @@ default_args = {
 }
 
 dag = DAG(
-    'email_classifier_prediction_dag',
+    'phone_number_prediction_dag',
     default_args=default_args,
-    description='DAG for email classifier prediction',
+    description='DAG for phone number prediction',
     schedule_interval=None,
 )
 
